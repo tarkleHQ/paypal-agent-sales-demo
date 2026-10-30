@@ -1,0 +1,13 @@
+{
+  "name": "paypal-agent-sales-demo",
+  "version": "0.1.0",
+  "description": "An AI assistant (MCP server) that sells files and event tickets through PayPal checkout. Sandbox only.",
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node src/mcp-server.js",
+    "demo": "node scripts/demo.js",
+    "test": "node --test test/*.test.js"
+  }
+}

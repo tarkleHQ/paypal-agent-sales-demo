@@ -37,6 +37,11 @@ export function createMockPayPal({ baseUrl = "http://localhost:3000" } = {}) {
       return { status: "COMPLETED", captureId: order.captureId, amount: order.amount, currency: order.currency };
     },
 
+    // Mock deliveries are trusted only when they carry the header the tests send.
+    async verifyWebhook({ headers }) {
+      return headers["x-mock-signature"] === "valid";
+    },
+
     async refundCapture(captureId) {
       const order = [...orders.values()].find((o) => o.captureId === captureId);
       if (!order) throw new PayPalError("RESOURCE_NOT_FOUND", 404);

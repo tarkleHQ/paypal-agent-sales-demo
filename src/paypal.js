@@ -97,6 +97,22 @@ export function createPayPalClient({ clientId, secret, baseUrl = SANDBOX_BASE, f
       };
     },
 
+    // Asks PayPal to verify the signature of a webhook delivery. Needs the raw body and the id of
+    // the webhook registered in the developer dashboard.
+    async verifyWebhook({ headers, rawBody, webhookId }) {
+      const event = JSON.parse(rawBody);
+      const data = await call("POST", "/v1/notifications/verify-webhook-signature", {
+        auth_algo: headers["paypal-auth-algo"],
+        cert_url: headers["paypal-cert-url"],
+        transmission_id: headers["paypal-transmission-id"],
+        transmission_sig: headers["paypal-transmission-sig"],
+        transmission_time: headers["paypal-transmission-time"],
+        webhook_id: webhookId,
+        webhook_event: event,
+      });
+      return data.verification_status === "SUCCESS";
+    },
+
     async refundCapture(captureId, { amount, currency }) {
       const data = await call(
         "POST",

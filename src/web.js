@@ -33,7 +33,7 @@ function tokenMatches(header, token) {
 
 // `mcp` is a JSON-RPC handler. /mcp exists only when `mcpToken` is set, because the tools
 // create products and refund orders, so an open endpoint on a public URL would be unsafe.
-export function createWebServer({ service, paypal, baseUrl, mcp, mcpToken }) {
+export function createWebServer({ service, paypal, baseUrl, mcp, mcpToken, webhookId }) {
   const send = (res, status, html, headers = {}) => {
     res.writeHead(status, { "Content-Type": "text/html; charset=utf-8", ...headers });
     res.end(html);
@@ -44,6 +44,22 @@ export function createWebServer({ service, paypal, baseUrl, mcp, mcpToken }) {
     const parts = url.pathname.split("/").filter(Boolean);
     try {
       if (url.pathname === "/healthz") return send(res, 200, "ok", { "Content-Type": "text/plain" });
+
+      // PayPal webhooks. A real delivery is trusted only after PayPal confirms its signature.
+      if (url.pathname === "/paypal/webhook" && (paypal.mock || webhookId)) {
+        if (req.method !== "POST") return send(res, 405, "Use POST", { "Content-Type": "text/plain", Allow: "POST" });
+        const rawBody = await readBody(req);
+        let verified = false;
+        try {
+          verified = await paypal.verifyWebhook({ headers: req.headers, rawBody, webhookId });
+        } catch {
+          verified = false;
+        }
+        if (!verified) return send(res, 400, "Signature check failed", { "Content-Type": "text/plain" });
+        const outcome = await service.handleWebhookEvent(JSON.parse(rawBody));
+        res.writeHead(200, { "Content-Type": "application/json" });
+        return res.end(JSON.stringify(outcome));
+      }
 
       if (url.pathname === "/mcp" && mcp && mcpToken) {
         const json = (status, body) => {

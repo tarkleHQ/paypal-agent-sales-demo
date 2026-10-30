@@ -17,6 +17,6 @@ export function bootstrap(env = process.env) {
   const service = createService({ paypal, baseUrl });
   const tools = createTools(service);
   const mcp = createMcpHandler(tools);
-  const web = createWebServer({ service, paypal, baseUrl, mcp, mcpToken: env.MCP_TOKEN });
+  const web = createWebServer({ service, paypal, baseUrl, mcp, mcpToken: env.MCP_TOKEN, webhookId: env.PAYPAL_WEBHOOK_ID });
   return { port, baseUrl, paypal, service, web, tools, mcp };
 }

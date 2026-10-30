@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "tarkle-sales": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://YOUR-SERVICE.onrender.com/mcp", "--header", "Authorization: Bearer YOUR_MCP_TOKEN"]
+    },
+    "paypal": {
+      "command": "npx",
+      "args": ["-y", "@paypal/mcp", "--tools=all"],
+      "env": {
+        "PAYPAL_ACCESS_TOKEN": "OUTPUT_OF_node_scripts/paypal-token.js",
+        "PAYPAL_ENVIRONMENT": "SANDBOX"
+      }
+    }
+  }
+}

@@ -19,3 +19,5 @@ services:
         sync: false
       - key: PAYPAL_CLIENT_SECRET
         sync: false
+      - key: PAYPAL_WEBHOOK_ID # id of the webhook you register for <service url>/paypal/webhook
+        sync: false

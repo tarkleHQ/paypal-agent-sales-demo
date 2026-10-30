@@ -19,6 +19,7 @@ export const fromCents = (cents) => (cents / 100).toFixed(2);
 export function createService({ paypal, baseUrl, now = () => Date.now() }) {
   const products = new Map();
   const orders = new Map();
+  const seenEvents = new Set();
   const newId = (prefix) => `${prefix}_${randomBytes(5).toString("hex")}`;
 
   function currencyOf(currency = "USD") {
@@ -177,6 +178,67 @@ export function createService({ paypal, baseUrl, now = () => Date.now() }) {
       await paypal.refundCapture(order.captureId, { amount: fromCents(product.cents), currency: product.currency });
       order.status = "refunded";
       return { orderId, status: "refunded", amount: fromCents(product.cents), currency: product.currency };
+    },
+
+    // Handles a webhook event that has already passed signature verification. Safe to deliver twice.
+    async handleWebhookEvent(event) {
+      if (!event?.id || !event.event_type) return { handled: false, reason: "malformed event" };
+      if (seenEvents.has(event.id)) return { handled: false, reason: "duplicate" };
+      const r = event.resource || {};
+      const byCapture = (id) => [...orders.values()].find((o) => o.captureId && o.captureId === id);
+      const byPayPalOrder = (id) => [...orders.values()].find((o) => o.paypalOrderId === id);
+      let result = { handled: false, reason: `ignored ${event.event_type}` };
+
+      switch (event.event_type) {
+        // The buyer approved but may have closed the tab before returning: capture now.
+        case "CHECKOUT.ORDER.APPROVED": {
+          const order = byPayPalOrder(r.id);
+          if (!order) break;
+          try {
+            const view = await this.completeCheckout(r.id);
+            result = { handled: true, orderId: view.orderId, status: view.status };
+          } catch (err) {
+            if (err.name === "PayPalError" && (err.status ?? 500) >= 500) throw err; // let PayPal retry
+            result = { handled: false, reason: err.message };
+          }
+          break;
+        }
+        // Capture finished on PayPal's side. Same amount check as the return path.
+        case "PAYMENT.CAPTURE.COMPLETED": {
+          const order = byPayPalOrder(r.supplementary_data?.related_ids?.order_id);
+          if (!order || order.status === "paid" || order.status === "refunded") break;
+          const product = mustGetProduct(order.productId);
+          if (r.amount?.value === fromCents(product.cents) && r.amount?.currency_code === product.currency) {
+            order.status = "paid";
+            order.captureId = r.id;
+            order.paidAt = now();
+          } else {
+            order.status = "failed";
+          }
+          result = { handled: true, orderId: order.id, status: order.status };
+          break;
+        }
+        // Money went back to the buyer outside this app (a dispute, or a refund made in PayPal).
+        case "PAYMENT.CAPTURE.REFUNDED":
+        case "PAYMENT.CAPTURE.REVERSED": {
+          const upLink = r.links?.find((l) => l.rel === "up")?.href;
+          const captureId = event.event_type === "PAYMENT.CAPTURE.REVERSED" ? r.id : upLink?.split("/").pop();
+          const order = byCapture(captureId);
+          if (!order || order.status !== "paid") break;
+          order.status = "refunded";
+          result = { handled: true, orderId: order.id, status: "refunded" };
+          break;
+        }
+        case "PAYMENT.CAPTURE.DENIED": {
+          const order = byPayPalOrder(r.supplementary_data?.related_ids?.order_id);
+          if (!order || order.status !== "pending") break;
+          order.status = "failed";
+          result = { handled: true, orderId: order.id, status: "failed" };
+          break;
+        }
+      }
+      seenEvents.add(event.id);
+      return result;
     },
 
     salesStatus() {

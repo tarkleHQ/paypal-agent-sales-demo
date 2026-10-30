@@ -38,3 +38,40 @@ test("MCP: list tools and sell a file end to end over HTTP", async () => {
     app.web.close();
   }
 });
+
+test("HTTP /mcp: disabled without a token, bearer auth, one message per POST", async () => {
+  const post = (app, body, token) =>
+    fetch(`${app.baseUrl}/mcp`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: typeof body === "string" ? body : JSON.stringify(body),
+    });
+
+  const open = bootstrap({ PORT: "3198" });
+  await new Promise((r) => open.web.listen(open.port, r));
+  try {
+    assert.equal((await post(open, { jsonrpc: "2.0", id: 1, method: "tools/list" })).status, 404);
+  } finally {
+    open.web.close();
+  }
+
+  const app = bootstrap({ PORT: "3197", MCP_TOKEN: "s3cret" });
+  await new Promise((r) => app.web.listen(app.port, r));
+  try {
+    assert.equal((await post(app, { jsonrpc: "2.0", id: 1, method: "tools/list" })).status, 401);
+    assert.equal((await post(app, { jsonrpc: "2.0", id: 1, method: "tools/list" }, "wrong!")).status, 401);
+
+    const ok = await post(app, { jsonrpc: "2.0", id: 1, method: "tools/list" }, "s3cret");
+    assert.equal(ok.status, 200);
+    assert.equal((await ok.json()).result.tools.length, 4);
+
+    assert.equal((await post(app, { jsonrpc: "2.0", method: "notifications/initialized" }, "s3cret")).status, 202);
+    assert.equal((await post(app, "{nope", "s3cret")).status, 400);
+    assert.equal((await post(app, [{ jsonrpc: "2.0", id: 1, method: "ping" }], "s3cret")).status, 400);
+    assert.equal((await post(app, "x".repeat(200_000), "s3cret")).status, 413);
+    assert.equal((await fetch(`${app.baseUrl}/mcp`, { headers: { Authorization: "Bearer s3cret" } })).status, 405);
+    assert.equal((await fetch(`${app.baseUrl}/healthz`)).status, 200);
+  } finally {
+    app.web.close();
+  }
+});

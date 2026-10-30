@@ -2,10 +2,9 @@
 // Runs the MCP server on stdio and the buyer web pages on PORT, in one process.
 import { createInterface } from "node:readline";
 import { bootstrap } from "./bootstrap.js";
-import { createMcpHandler } from "./mcp.js";
 
 const app = bootstrap();
-const handle = createMcpHandler(app.tools);
+const handle = app.mcp;
 
 app.web.listen(app.port, () => {
   // stdout is reserved for the protocol, so logs go to stderr.

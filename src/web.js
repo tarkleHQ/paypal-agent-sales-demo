@@ -1,5 +1,6 @@
 // Buyer-facing pages: product page, PayPal return, download. No dependencies.
 import { createServer } from "node:http";
+import { timingSafeEqual } from "node:crypto";
 
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 
@@ -7,7 +8,32 @@ const page = (body) => `<!doctype html><html><head><meta charset="utf-8"><meta n
 <style>body{font:16px system-ui;max-width:480px;margin:10vh auto;padding:0 16px;color:#111}button,a.btn{background:#0070ba;color:#fff;border:0;border-radius:8px;padding:12px 20px;font-size:16px;cursor:pointer;text-decoration:none;display:inline-block}small{color:#555}</style></head>
 <body>${body}<p><small>Sandbox demo. No real money moves.</small></p></body></html>`;
 
-export function createWebServer({ service, paypal, baseUrl }) {
+const MAX_BODY = 100_000;
+
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    const chunks = [];
+    let tooLarge = false;
+    req.on("data", (c) => {
+      size += c.length;
+      if (size > MAX_BODY) tooLarge = true; // keep draining so the client can read our 413
+      else chunks.push(c);
+    });
+    req.on("end", () => (tooLarge ? reject(Object.assign(new Error("Body too large"), { status: 413 })) : resolve(Buffer.concat(chunks).toString("utf8"))));
+    req.on("error", reject);
+  });
+}
+
+function tokenMatches(header, token) {
+  const given = Buffer.from((header || "").replace(/^Bearer /i, ""));
+  const expected = Buffer.from(token);
+  return given.length === expected.length && timingSafeEqual(given, expected);
+}
+
+// `mcp` is a JSON-RPC handler. /mcp exists only when `mcpToken` is set, because the tools
+// create products and refund orders, so an open endpoint on a public URL would be unsafe.
+export function createWebServer({ service, paypal, baseUrl, mcp, mcpToken }) {
   const send = (res, status, html, headers = {}) => {
     res.writeHead(status, { "Content-Type": "text/html; charset=utf-8", ...headers });
     res.end(html);
@@ -17,6 +43,35 @@ export function createWebServer({ service, paypal, baseUrl }) {
     const url = new URL(req.url, baseUrl);
     const parts = url.pathname.split("/").filter(Boolean);
     try {
+      if (url.pathname === "/healthz") return send(res, 200, "ok", { "Content-Type": "text/plain" });
+
+      if (url.pathname === "/mcp" && mcp && mcpToken) {
+        const json = (status, body) => {
+          res.writeHead(status, { "Content-Type": "application/json" });
+          res.end(body === undefined ? "" : JSON.stringify(body));
+        };
+        if (!tokenMatches(req.headers.authorization, mcpToken)) {
+          res.setHeader("WWW-Authenticate", "Bearer");
+          return json(401, { error: "Unauthorized" });
+        }
+        if (req.method !== "POST") {
+          res.setHeader("Allow", "POST");
+          return json(405, { error: "Use POST" });
+        }
+        let msg;
+        try {
+          msg = JSON.parse(await readBody(req));
+        } catch (err) {
+          if (err.status === 413) return json(413, { error: "Body too large" });
+          return json(400, { jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } });
+        }
+        if (Array.isArray(msg) || typeof msg !== "object" || msg === null) {
+          return json(400, { jsonrpc: "2.0", id: null, error: { code: -32600, message: "Send one JSON-RPC message per request" } });
+        }
+        const out = await mcp(msg);
+        return out ? json(200, out) : json(202);
+      }
+
       if (req.method === "GET" && parts[0] === "buy" && parts.length === 2) {
         const p = service.publicProduct(parts[1]);
         const soldOut = p.seatsLeft === 0;

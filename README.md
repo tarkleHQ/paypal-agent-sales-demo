@@ -28,7 +28,8 @@ Needs Node 20 or later. No dependencies to install.
 ```sh
 npm test        # 11 tests, no credentials needed
 npm run demo    # scripted story: sell a file, sell a ticket, refund
-npm start       # MCP server on stdio, buyer pages on http://localhost:3000
+npm start       # hosted mode: buyer pages plus HTTP MCP at /mcp on http://localhost:3000
+npm run stdio   # MCP over stdio for local clients, plus the buyer pages
 ```
 
 Without credentials it uses an in-memory mock of PayPal. To use the real sandbox, create a sandbox REST app at developer.paypal.com and set:
@@ -44,6 +45,20 @@ Add it to an MCP client, for example in Claude Desktop's config:
 ```json
 { "mcpServers": { "paypal-sales": { "command": "node", "args": ["/path/to/src/mcp-server.js"] } } }
 ```
+
+## Host it on Render
+
+`render.yaml` is a Render Blueprint. Connect the repo in Render, then set `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET` in the dashboard. Render generates `MCP_TOKEN` for you and supplies the public URL.
+
+The server then exposes:
+
+- `/buy/...` buyer pages, and the PayPal return URL
+- `/healthz` health check
+- `/mcp` MCP over HTTP (one JSON-RPC message per POST), protected by `Authorization: Bearer <MCP_TOKEN>`
+
+`/mcp` is switched off when `MCP_TOKEN` is not set. Its tools create products and refund orders, so it should never be open on a public URL.
+
+Run a single instance only, because state is in memory. A free instance sleeps when idle, so use a paid one while people are testing.
 
 ## Known limits
 

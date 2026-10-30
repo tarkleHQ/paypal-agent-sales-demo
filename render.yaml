@@ -1,0 +1,21 @@
+# Render Blueprint. Connect the repo in Render and it creates this service.
+# Free instances sleep when idle and the app keeps orders in memory, so use a paid instance
+# (plan: starter) while judges test, and never run more than one instance.
+services:
+  - type: web
+    name: paypal-agent-sales-demo
+    runtime: node
+    plan: free
+    numInstances: 1
+    buildCommand: npm install --omit=dev
+    startCommand: node src/server.js
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: MCP_TOKEN        # bearer token an MCP client must send to /mcp
+        generateValue: true
+      - key: PAYPAL_CLIENT_ID # PayPal sandbox REST app. Set in the Render dashboard.
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false

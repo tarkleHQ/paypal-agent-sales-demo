@@ -1,7 +1,7 @@
 {
   "name": "paypal-agent-sales-demo",
   "version": "0.1.0",
-  "description": "An AI assistant (MCP server) that delivers client galleries paid by PayPal invoice, and sells files and tickets through PayPal checkout. Sandbox only.",
+  "description": "DUC Agency demo: an AI assistant delivers client photo galleries into a Tarkle client portal, unlocked when the PayPal invoice is paid. Sandbox only.",
   "type": "module",
   "license": "MIT",
   "engines": { "node": ">=20" },

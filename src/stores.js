@@ -15,5 +15,9 @@ export function createMockStore({ baseUrl }) {
       unlocked.delete(job.id);
     },
     isUnlocked: (job) => unlocked.has(job.id),
+    deliveryOf: () => null,
+    adopt(job, _delivery, isUnlocked = false) {
+      if (isUnlocked) unlocked.add(job.id);
+    },
   };
 }

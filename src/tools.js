@@ -110,7 +110,7 @@ export function createTools(service, jobs, { approvals = createApprovals() } = {
         "Create and send the PayPal invoice for a job. PayPal emails the client a pay link. Needs the photographer's approval: the first call sends nothing and returns a preview and an approvalCode; call again with the same jobId and the approvalCode only after they approve.",
       inputSchema: { type: "object", properties: { jobId: str("From create_client_job"), approvalCode: str("From the first call, after the photographer approved") }, required: ["jobId"] },
       run: async ({ jobId, approvalCode }) => {
-        const job = jobs.getJob(jobId);
+        const job = await jobs.loadJob(jobId);
         if (job.status !== "draft") return job;
         if (!approvals.valid("send_job_invoice", { jobId }, approvalCode)) {
           return approval("send_job_invoice", { jobId }, "Email this client a PayPal invoice", { to: job.client.email, title: job.title, amount: `${job.price} ${job.currency}`, files: job.files.length });
@@ -122,7 +122,7 @@ export function createTools(service, jobs, { approvals = createApprovals() } = {
       name: "get_job_status",
       description: "Where a job stands (draft, invoiced, delivered, refunded, cancelled, or review when a payment did not match). Re-reads the invoice from PayPal. Without jobId, lists every job.",
       inputSchema: { type: "object", properties: { jobId: str("Optional: one job") } },
-      run: async ({ jobId } = {}) => (jobId ? jobs.refreshJob(jobId) : jobs.listJobs()),
+      run: async ({ jobId } = {}) => (jobId ? jobs.refreshJob(jobId) : jobs.listAllJobs()),
     },
     {
       name: "refund_job",
@@ -130,7 +130,7 @@ export function createTools(service, jobs, { approvals = createApprovals() } = {
         "Refund a paid job in full through PayPal and lock the client's files again. Needs the photographer's approval: the first call refunds nothing and returns a preview and an approvalCode; call again with the same jobId and the approvalCode only after they approve.",
       inputSchema: { type: "object", properties: { jobId: str("From create_client_job"), approvalCode: str("From the first call, after the photographer approved") }, required: ["jobId"] },
       run: async ({ jobId, approvalCode }) => {
-        const job = jobs.getJob(jobId);
+        const job = await jobs.loadJob(jobId);
         if (!approvals.valid("refund_job", { jobId }, approvalCode)) {
           return approval("refund_job", { jobId }, "Refund this client in full and lock their files", { to: job.client.email, title: job.title, amount: `${job.price} ${job.currency}`, status: job.status });
         }

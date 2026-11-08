@@ -1,6 +1,5 @@
-# Render Blueprint. Connect the repo in Render and it creates this service.
-# Free instances sleep when idle and the app keeps orders in memory, so use a paid instance
-# (plan: starter) while judges test, and never run more than one instance.
+# Render Blueprint. Connect the repo in Render and it creates this service (one free web service, nothing else).
+# Jobs survive the free instance sleeping: they are rebuilt from their PayPal invoices. Never run more than one instance.
 services:
   - type: web
     name: paypal-agent-sales-demo

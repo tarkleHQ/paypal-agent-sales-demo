@@ -67,8 +67,10 @@ export function createJobService({ paypal, store, baseUrl, notify = async () => 
     }
   }
 
-  // Applies what PayPal says about the invoice. Returns the job view.
-  async function applyInvoice(job, invoice) {
+  // Applies what PayPal says about the invoice. Returns the job view. `silent` (a job rebuilt after a restart) sends no notifications:
+  // they went out when it happened.
+  async function applyInvoice(job, invoice, { silent = false } = {}) {
+    const say = silent ? async () => {} : emit;
     if (invoice.reference && invoice.reference !== job.id) throw new Error("This invoice belongs to another job.");
     if (invoice.paymentIds?.length) job.paymentIds = invoice.paymentIds;
 
@@ -82,16 +84,87 @@ export function createJobService({ paypal, store, baseUrl, notify = async () => 
       await store.unlock(job);
       job.status = "delivered";
       job.deliveredAt = now();
-      await emit("job.paid", job);
-      await emit("job.delivered", job);
+      await say("job.paid", job);
+      await say("job.delivered", job);
     } else if (REFUNDED.has(invoice.status) && (job.status === "delivered" || job.status === "review")) {
       await store.lock(job);
       job.status = "refunded";
-      await emit("job.refunded", job);
+      await say("job.refunded", job);
     } else if (CANCELLED.has(invoice.status) && job.status === "invoiced") {
       job.status = "cancelled";
     }
     return view(job);
+  }
+
+  // ---- Surviving a restart. Render's free instances lose memory and disk when they sleep, so each job also lives in its PayPal
+  // invoice: the reference is the job id and the private memo holds the client's page key and the store's delivery ids. After a
+  // restart, jobs are rebuilt from the invoices (amount, client and status are PayPal's own), then brought up to date.
+  const MEMO_PREFIX = "tarkle-demo:v1 ";
+  const memoOf = (job) => MEMO_PREFIX + JSON.stringify({ k: job.accessKey, d: job.delivery || null });
+
+  function parseMemo(memo) {
+    if (typeof memo !== "string" || !memo.startsWith(MEMO_PREFIX)) return null;
+    try {
+      const data = JSON.parse(memo.slice(MEMO_PREFIX.length));
+      return typeof data.k === "string" && /^[0-9a-f]{32}$/.test(data.k) ? data : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function rebuild(invoiceId, { apply = true } = {}) {
+    const invoice = await paypal.getInvoice(invoiceId);
+    const memo = parseMemo(invoice.memo);
+    if (!memo || !/^job_[0-9a-f]{10}$/.test(invoice.reference || "") || jobs.has(invoice.reference)) return jobs.get(invoice.reference) ?? null;
+    if (invoice.status === "DRAFT") return null;
+    const job = {
+      id: invoice.reference,
+      title: invoice.itemName || "Client delivery",
+      client: { name: invoice.recipientName || "", email: String(invoice.recipientEmail || "").toLowerCase() },
+      note: invoice.note || "",
+      files: [],
+      cents: cents(invoice.amount),
+      currency: invoice.currency,
+      status: "invoiced",
+      accessKey: memo.k,
+      delivery: memo.d,
+      invoiceId: invoice.id,
+      payUrl: invoice.payUrl,
+      invited: true,
+      createdAt: now(),
+    };
+    const wasUnlocked = invoice.status === "PAID" || REFUNDED.has(invoice.status);
+    store.adopt(job, memo.d, wasUnlocked);
+    if (REFUNDED.has(invoice.status)) job.status = "delivered"; // so the refund below locks it again (repeat-safe)
+    jobs.set(job.id, job);
+    // Brought up to date quietly; a webhook that triggered the rebuild applies the invoice itself, with its notifications.
+    if (apply) await serialize(job.id, () => applyInvoice(job, invoice, { silent: true }));
+    return job;
+  }
+
+  let recovered = null;
+  function recoverAll() {
+    recovered ??= (async () => {
+      const ids = await paypal.listInvoiceIds();
+      for (const id of ids) {
+        if ([...jobs.values()].some((j) => j.invoiceId === id)) continue;
+        try {
+          await rebuild(id);
+        } catch (err) {
+          console.error(`[jobs] could not rebuild invoice ${id}: ${err.message}`);
+        }
+      }
+    })().catch((err) => {
+      recovered = null; // try again next time
+      throw err;
+    });
+    return recovered;
+  }
+
+  async function loadJob(jobId) {
+    if (jobs.has(jobId)) return jobs.get(jobId);
+    await recoverAll();
+    return mustGet(jobId);
   }
 
   return {
@@ -122,6 +195,7 @@ export function createJobService({ paypal, store, baseUrl, notify = async () => 
       try {
         const prepared = await store.prepare(job);
         job.clientUrl = prepared.clientUrl;
+        job.delivery = store.deliveryOf?.(job) ?? null;
       } catch (err) {
         // Nothing was sent or charged; the job is dropped so a retry starts clean. A folder the store already made may remain.
         jobs.delete(job.id);
@@ -133,7 +207,7 @@ export function createJobService({ paypal, store, baseUrl, notify = async () => 
     // Creates and sends the PayPal invoice. Repeat-safe: the job id is the invoice reference and the request idempotency key.
     sendInvoice(jobId) {
       return serialize(jobId, async () => {
-        const job = mustGet(jobId);
+        const job = await loadJob(jobId);
         // A send whose portal invite failed is finished here on the next try; anything else after draft is already done.
         if (job.status === "invoiced" && store.invite && !job.invited) {
           await store.invite(job);
@@ -148,6 +222,7 @@ export function createJobService({ paypal, store, baseUrl, notify = async () => 
           itemName: job.title,
           itemDescription: `${job.files.length} ${job.files.length === 1 ? "file" : "files"}, delivered in your client portal once paid.`,
           note: job.note || undefined,
+          memo: memoOf(job),
           recipient: job.client,
         });
         const sent = await paypal.sendInvoice(draft.id);
@@ -166,7 +241,7 @@ export function createJobService({ paypal, store, baseUrl, notify = async () => 
     // Re-reads the invoice from PayPal and applies it: the fallback when a webhook is late or missing.
     refreshJob(jobId) {
       return serialize(jobId, async () => {
-        const job = mustGet(jobId);
+        const job = await loadJob(jobId);
         if (!job.invoiceId) return view(job);
         return applyInvoice(job, await paypal.getInvoice(job.invoiceId));
       });
@@ -175,7 +250,7 @@ export function createJobService({ paypal, store, baseUrl, notify = async () => 
     // Refunds the client in full through PayPal and locks the gallery again.
     refundJob(jobId) {
       return serialize(jobId, async () => {
-        const job = mustGet(jobId);
+        const job = await loadJob(jobId);
         if (job.status !== "delivered" && job.status !== "review") throw new Error(`Only a paid job can be refunded (this one is ${job.status}).`);
         if (!job.paymentIds?.length) job.paymentIds = (await paypal.getInvoice(job.invoiceId)).paymentIds;
         const paymentId = job.paymentIds?.[0];
@@ -196,11 +271,18 @@ export function createJobService({ paypal, store, baseUrl, notify = async () => 
       if (event.event_type.startsWith("INVOICING.INVOICE.")) {
         const invoiceId = r.invoice?.id || r.id;
         job = [...jobs.values()].find((j) => j.invoiceId && j.invoiceId === invoiceId);
+        // After a restart (a sleeping free instance is woken by this very webhook), rebuild the job from its invoice first.
+        if (!job && invoiceId) job = await rebuild(invoiceId, { apply: false });
         if (!job) return { handled: false, reason: "unknown invoice" };
       } else if (event.event_type === "PAYMENT.CAPTURE.REFUNDED" || event.event_type === "PAYMENT.CAPTURE.REVERSED") {
         const upLink = r.links?.find((l) => l.rel === "up")?.href;
         const paymentId = event.event_type === "PAYMENT.CAPTURE.REVERSED" ? r.id : upLink?.split("/").pop();
-        job = [...jobs.values()].find((j) => j.paymentIds?.includes(paymentId));
+        const byPayment = () => [...jobs.values()].find((j) => j.paymentIds?.includes(paymentId));
+        job = byPayment();
+        if (!job && paymentId) {
+          await recoverAll();
+          job = byPayment();
+        }
         if (!job) return null;
       } else {
         return null;
@@ -224,6 +306,12 @@ export function createJobService({ paypal, store, baseUrl, notify = async () => 
 
     getJob: (jobId) => view(mustGet(jobId)),
     listJobs: () => [...jobs.values()].map(view),
+    // The same, rebuilding jobs from PayPal first when this instance restarted.
+    loadJob: async (jobId) => view(await loadJob(jobId)),
+    async listAllJobs() {
+      await recoverAll();
+      return [...jobs.values()].map(view);
+    },
 
     // What the client's page may show: the job, and whether files can be downloaded. Null for a wrong key.
     clientView(jobId, key) {

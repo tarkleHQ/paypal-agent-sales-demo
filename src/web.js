@@ -1,6 +1,7 @@
 // Buyer-facing pages: product page, PayPal return, download. No dependencies.
 import { createServer } from "node:http";
 import { timingSafeEqual } from "node:crypto";
+import { homePage } from "./home.js";
 
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 
@@ -33,7 +34,7 @@ function tokenMatches(header, token) {
 
 // `mcp` is a JSON-RPC handler. /mcp exists only when `mcpToken` is set, because the tools
 // create products and refund orders, so an open endpoint on a public URL would be unsafe.
-export function createWebServer({ service, jobs, paypal, baseUrl, mcp, mcpToken, webhookId }) {
+export function createWebServer({ service, jobs, paypal, baseUrl, mcp, mcpToken, webhookId, studioName, portalUrl }) {
   const send = (res, status, html, headers = {}) => {
     res.writeHead(status, { "Content-Type": "text/html; charset=utf-8", ...headers });
     res.end(html);
@@ -44,6 +45,7 @@ export function createWebServer({ service, jobs, paypal, baseUrl, mcp, mcpToken,
     const parts = url.pathname.split("/").filter(Boolean);
     try {
       if (url.pathname === "/healthz") return send(res, 200, "ok", { "Content-Type": "text/plain" });
+      if (req.method === "GET" && url.pathname === "/") return send(res, 200, homePage({ studioName, portalUrl }));
 
       // PayPal webhooks. A real delivery is trusted only after PayPal confirms its signature.
       if (url.pathname === "/paypal/webhook" && (paypal.mock || webhookId)) {

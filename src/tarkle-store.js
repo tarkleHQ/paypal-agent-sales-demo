@@ -123,6 +123,11 @@ export function createTarkleStore({ apiBase, apiKey, workspaceKey, portalUrl = n
     },
 
     isUnlocked: (job) => state.get(job.id)?.unlocked === true,
+    // After a restart: take back a delivery rebuilt from the job's PayPal invoice memo.
+    adopt(job, delivery, unlocked = false) {
+      if (!delivery?.transferId) throw new Error("This job has no Tarkle delivery to resume.");
+      state.set(job.id, { contactId: delivery.contactId, folderId: delivery.folderId, transferId: String(delivery.transferId), unlocked });
+    },
     deliveryOf: (job) => {
       const s = state.get(job.id);
       return s ? { contactId: s.contactId, folderId: s.folderId, transferId: s.transferId } : null;

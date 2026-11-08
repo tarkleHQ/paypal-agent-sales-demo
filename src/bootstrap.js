@@ -28,6 +28,6 @@ export function bootstrap(env = process.env, { fetchImpl = fetch } = {}) {
   const jobs = createJobService({ paypal, store, baseUrl, notify });
   const tools = createTools(service, jobs);
   const mcp = createMcpHandler(tools);
-  const web = createWebServer({ service, jobs, paypal, baseUrl, mcp, mcpToken: env.MCP_TOKEN, webhookId: env.PAYPAL_WEBHOOK_ID });
+  const web = createWebServer({ service, jobs, paypal, baseUrl, mcp, mcpToken: env.MCP_TOKEN, webhookId: env.PAYPAL_WEBHOOK_ID, studioName: env.STUDIO_NAME || "DUC Agency", portalUrl: env.TARKLE_PORTAL_URL || null });
   return { port, baseUrl, paypal, service, jobs, store, web, tools, mcp };
 }

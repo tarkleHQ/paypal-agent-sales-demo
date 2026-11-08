@@ -127,13 +127,13 @@ export function createPayPalClient({ clientId, secret, baseUrl = SANDBOX_BASE, f
     // ---- Invoicing v2 (the photographer's invoice). Field names from PayPal's published Invoicing v2 OpenAPI spec.
 
     // Creates a draft invoice. `reference` is our job id: it is the idempotency key, so a retry never makes a second invoice.
-    async createInvoice({ reference, currency, amount, itemName, itemDescription, note, recipient }) {
+    async createInvoice({ reference, currency, amount, itemName, itemDescription, note, memo, recipient }) {
       const [givenName, ...rest] = String(recipient.name || "").trim().split(/\s+/);
       const data = await call(
         "POST",
         "/v2/invoicing/invoices",
         {
-          detail: { currency_code: currency, reference, ...(note ? { note } : {}) },
+          detail: { currency_code: currency, reference, ...(note ? { note } : {}), ...(memo ? { memo } : {}) },
           primary_recipients: [
             {
               billing_info: {
@@ -173,6 +173,12 @@ export function createPayPalClient({ clientId, secret, baseUrl = SANDBOX_BASE, f
     async getInvoice(invoiceId) {
       return normalizeInvoice(await call("GET", `/v2/invoicing/invoices/${encodeURIComponent(invoiceId)}`));
     },
+
+    // The ids of this merchant's most recent invoices (newest first), so jobs can be rebuilt after a restart.
+    async listInvoiceIds({ pageSize = 100 } = {}) {
+      const data = await call("GET", `/v2/invoicing/invoices?page=1&page_size=${pageSize}`);
+      return (data.items || []).map((i) => i.id).filter(Boolean);
+    },
   };
 }
 
@@ -186,6 +192,11 @@ export function normalizeInvoice(data = {}) {
     currency: data.amount?.currency_code || data.detail?.currency_code,
     paidAmount: data.payments?.paid_amount?.value ?? null,
     payUrl: data.detail?.metadata?.recipient_view_url || null,
+    memo: data.detail?.memo ?? null,
+    note: data.detail?.note ?? null,
+    itemName: data.items?.[0]?.name ?? null,
+    recipientEmail: data.primary_recipients?.[0]?.billing_info?.email_address ?? null,
+    recipientName: [data.primary_recipients?.[0]?.billing_info?.name?.given_name, data.primary_recipients?.[0]?.billing_info?.name?.surname].filter(Boolean).join(" ") || null,
     // PayPal payments recorded against the invoice; their ids are what a refund needs.
     paymentIds: (data.payments?.transactions || []).filter((t) => (t.type || "PAYPAL") === "PAYPAL" && t.payment_id).map((t) => t.payment_id),
   };

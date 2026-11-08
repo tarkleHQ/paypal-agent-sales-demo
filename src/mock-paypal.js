@@ -58,12 +58,16 @@ export function createMockPayPal({ baseUrl = "http://localhost:3000" } = {}) {
     },
 
     // ---- Invoicing, same rules as the real API: a draft is not payable until sent, and PAID only when the full amount is paid.
-    async createInvoice({ reference, currency, amount, recipient }) {
+    async createInvoice({ reference, currency, amount, itemName, note, memo, recipient }) {
       const existing = [...invoices.values()].find((i) => i.reference === reference);
       if (existing) return view(existing);
       const id = `INV2-MOCK-${++counter}`;
-      invoices.set(id, { id, reference, currency, amount, recipient, status: "DRAFT", paid: null, paymentId: null });
+      invoices.set(id, { id, reference, currency, amount, itemName, note, memo, recipient, status: "DRAFT", paid: null, paymentId: null });
       return view(invoices.get(id));
+    },
+
+    async listInvoiceIds() {
+      return [...invoices.keys()].reverse();
     },
 
     async sendInvoice(id) {
@@ -96,7 +100,9 @@ export function createMockPayPal({ baseUrl = "http://localhost:3000" } = {}) {
     return normalizeInvoice({
       id: i.id,
       status: i.status,
-      detail: { reference: i.reference, currency_code: i.currency, metadata: { recipient_view_url: i.status === "DRAFT" ? undefined : `${baseUrl}/mock/invoice?id=${encodeURIComponent(i.id)}` } },
+      detail: { reference: i.reference, currency_code: i.currency, note: i.note, memo: i.memo, metadata: { recipient_view_url: i.status === "DRAFT" ? undefined : `${baseUrl}/mock/invoice?id=${encodeURIComponent(i.id)}` } },
+      items: i.itemName ? [{ name: i.itemName }] : [],
+      primary_recipients: i.recipient ? [{ billing_info: { email_address: i.recipient.email, name: { given_name: i.recipient.name } } }] : [],
       amount: { value: i.amount, currency_code: i.currency },
       payments: i.paid ? { paid_amount: { value: i.paid, currency_code: i.currency }, transactions: [{ type: "PAYPAL", payment_id: i.paymentId, method: "PAYPAL" }] } : undefined,
     });

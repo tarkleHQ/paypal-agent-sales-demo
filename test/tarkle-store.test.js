@@ -125,8 +125,8 @@ test("a job is delivered into the client's Tarkle portal, view only, before anyo
     const [t] = fake.db.transfers;
     assert.deepEqual(t.items, [{ id: fake.db.folders[0].id, type: "folder" }]);
     assert.equal(t.view_only, true);
-    assert.equal(t.access, "password");
-    assert.equal(t.hasPassword, true);
+    assert.equal(t.access, "public", "no password: the portal opens the transfer through its link, and view only is the lock");
+    assert.equal(t.hasPassword, false);
     assert.deepEqual(t.contactIds, [contact.contactId]);
     // The transfer password is never shown anywhere.
     assert.doesNotMatch(JSON.stringify(app.jobs.getJob(job.jobId)), /password/i);

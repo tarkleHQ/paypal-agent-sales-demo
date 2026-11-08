@@ -1,8 +1,9 @@
 // Delivers a job's gallery into the client's own Tarkle client portal, through Tarkle's public API v1 only (no Tarkle code here).
 //
 //   prepare(job)  find or create the client as a Tarkle contact, upload the files into a new folder, share the folder as a
-//                 VIEW-ONLY transfer with a random password nobody is told (so the public link opens nothing), and deliver that
-//                 transfer to the contact's portal. The client sees the files there but cannot download them.
+//                 VIEW-ONLY transfer and deliver it to the contact's portal. The client sees the files there but cannot download
+//                 them: Tarkle enforces view only on every download route (in the portal and on the transfer's link). No password:
+//                 the portal opens the transfer through its link, and a password would lock the signed-in client out.
 //   invite(job)   turn the contact's portal access on. Tarkle emails the portal invite the first time. Called only after the
 //                 photographer approved sending the invoice, because it emails the client.
 //   unlock(job)   PATCH /transfers/{id} { view_only: false }: downloads work in the portal. Called only after PayPal says paid.
@@ -10,7 +11,6 @@
 //
 // Every write sends an Idempotency-Key fixed per job and step, so a retry after a timeout never makes a second contact, folder,
 // upload or transfer (Tarkle answers a repeat with the first answer). The API key never leaves this server.
-import { randomBytes } from "node:crypto";
 
 export class TarkleError extends Error {
   constructor(message, status, code) {
@@ -84,7 +84,7 @@ export function createTarkleStore({ apiBase, apiKey, workspaceKey, portalUrl = n
     kind: "tarkle",
 
     async prepare(job) {
-      const s = state.get(job.id) || { password: randomBytes(18).toString("base64url"), unlocked: false };
+      const s = state.get(job.id) || { unlocked: false };
       state.set(job.id, s);
       s.contactId ??= await findOrCreateContact(job);
       if (!s.folderId) {
@@ -96,7 +96,7 @@ export function createTarkleStore({ apiBase, apiKey, workspaceKey, portalUrl = n
         const transfer = await call(
           "POST",
           "/transfers",
-          { items: [{ id: s.folderId, type: "folder" }], access: "password", password: s.password, view_only: true, title: job.title },
+          { items: [{ id: s.folderId, type: "folder" }], access: "public", view_only: true, title: job.title },
           key(job, "transfer"),
         );
         s.transferId = transfer.id;

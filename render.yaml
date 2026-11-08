@@ -21,3 +21,5 @@ services:
         sync: false
       - key: PAYPAL_WEBHOOK_ID # id of the webhook you register for <service url>/paypal/webhook
         sync: false
+      - key: ZAPIER_WEBHOOK_URL # optional Zapier Catch Hook for job.paid, job.delivered and job.refunded
+        sync: false

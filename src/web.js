@@ -33,7 +33,7 @@ function tokenMatches(header, token) {
 
 // `mcp` is a JSON-RPC handler. /mcp exists only when `mcpToken` is set, because the tools
 // create products and refund orders, so an open endpoint on a public URL would be unsafe.
-export function createWebServer({ service, paypal, baseUrl, mcp, mcpToken, webhookId }) {
+export function createWebServer({ service, jobs, paypal, baseUrl, mcp, mcpToken, webhookId }) {
   const send = (res, status, html, headers = {}) => {
     res.writeHead(status, { "Content-Type": "text/html; charset=utf-8", ...headers });
     res.end(html);
@@ -56,7 +56,9 @@ export function createWebServer({ service, paypal, baseUrl, mcp, mcpToken, webho
           verified = false;
         }
         if (!verified) return send(res, 400, "Signature check failed", { "Content-Type": "text/plain" });
-        const outcome = await service.handleWebhookEvent(JSON.parse(rawBody));
+        const event = JSON.parse(rawBody);
+        // Job (invoice) events first; anything that is not about a job goes to the order flow.
+        const outcome = (jobs && (await jobs.handleWebhookEvent(event))) || (await service.handleWebhookEvent(event));
         res.writeHead(200, { "Content-Type": "application/json" });
         return res.end(JSON.stringify(outcome));
       }
@@ -135,6 +137,47 @@ ${soldOut ? "<p>Sold out.</p>" : `<form method="post" action="/buy/${esc(p.id)}/
           "Content-Disposition": `attachment; filename="${file.fileName.replace(/[^\w.\- ]/g, "_")}"`,
         });
         return res.end(file.content);
+      }
+
+      // The client's gallery (mock store). Looking at it also re-reads the invoice, the fallback when a webhook is late.
+      if (jobs && req.method === "GET" && parts[0] === "client" && parts.length === 2) {
+        const key = url.searchParams.get("key") || "";
+        if (!jobs.clientView(parts[1], key)) return send(res, 403, page("<h1>No access</h1><p>This link is not valid.</p>"));
+        if (jobs.clientView(parts[1], key).status === "invoiced") await jobs.refreshJob(parts[1]).catch(() => {});
+        const v = jobs.clientView(parts[1], key);
+        const files = v.files
+          .map((name, i) => (v.unlocked ? `<li><a href="/client/${esc(v.jobId)}/file/${i}?key=${esc(key)}">${esc(name)}</a></li>` : `<li>${esc(name)} <small>(locked)</small></li>`))
+          .join("");
+        const action = v.unlocked
+          ? "<p>Your files are ready to download.</p>"
+          : v.status === "invoiced" && v.payUrl
+            ? `<p>Pay the invoice to unlock your files.</p><p><a class="btn" href="${esc(v.payUrl)}">Pay ${esc(v.price)} ${esc(v.currency)} with PayPal</a></p>`
+            : v.status === "refunded"
+              ? "<p>This delivery was refunded.</p>"
+              : v.status === "review"
+                ? "<p>We received a payment that needs a check. Your photographer will be in touch.</p>"
+                : "<p>Your photographer has not sent the invoice yet.</p>";
+        return send(res, 200, page(`<h1>${esc(v.title)}</h1>${action}<ul>${files}</ul>`));
+      }
+
+      if (jobs && req.method === "GET" && parts[0] === "client" && parts[2] === "file" && parts.length === 4) {
+        const file = jobs.clientFile(parts[1], url.searchParams.get("key"), parts[3]);
+        if (!file) return send(res, 403, page("<h1>No access</h1><p>These files unlock once the invoice is paid.</p>"));
+        res.writeHead(200, {
+          "Content-Type": "application/octet-stream",
+          "Content-Disposition": `attachment; filename="${file.name.replace(/[^\w.\- ]/g, "_")}"`,
+        });
+        return res.end(file.content);
+      }
+
+      // Mock invoice page, only reachable when running without PayPal credentials: the client pays the invoice in full.
+      if (jobs && req.method === "GET" && url.pathname === "/mock/invoice" && paypal.mock) {
+        const invoiceId = url.searchParams.get("id") || "";
+        const job = jobs.listJobs().find((j) => j.invoiceId === invoiceId);
+        if (!job) return send(res, 404, page("<h1>Not found</h1>"));
+        paypal.payInvoice(invoiceId);
+        res.writeHead(302, { Location: `/client/${job.jobId}?key=${jobs.accessKeyFor(job.jobId)}` });
+        return res.end();
       }
 
       send(res, 404, page("<h1>Not found</h1>"));

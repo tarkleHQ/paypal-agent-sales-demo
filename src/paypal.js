@@ -38,7 +38,7 @@ export function createPayPalClient({ clientId, secret, baseUrl = SANDBOX_BASE, f
     return token;
   }
 
-  async function call(method, path, body, requestId) {
+  async function call(method, path, body, requestId, extraHeaders = {}) {
     const res = await fetchImpl(`${baseUrl}${path}`, {
       method,
       headers: {
@@ -46,6 +46,7 @@ export function createPayPalClient({ clientId, secret, baseUrl = SANDBOX_BASE, f
         "Content-Type": "application/json",
         // Idempotency: a retried call with the same id will not create a second order or refund.
         "PayPal-Request-Id": requestId || randomUUID(),
+        ...extraHeaders,
       },
       body: body ? JSON.stringify(body) : undefined,
     });
@@ -122,5 +123,70 @@ export function createPayPalClient({ clientId, secret, baseUrl = SANDBOX_BASE, f
       );
       return { id: data.id, status: data.status };
     },
+
+    // ---- Invoicing v2 (the photographer's invoice). Field names from PayPal's published Invoicing v2 OpenAPI spec.
+
+    // Creates a draft invoice. `reference` is our job id: it is the idempotency key, so a retry never makes a second invoice.
+    async createInvoice({ reference, currency, amount, itemName, itemDescription, note, recipient }) {
+      const [givenName, ...rest] = String(recipient.name || "").trim().split(/\s+/);
+      const data = await call(
+        "POST",
+        "/v2/invoicing/invoices",
+        {
+          detail: { currency_code: currency, reference, ...(note ? { note } : {}) },
+          primary_recipients: [
+            {
+              billing_info: {
+                email_address: recipient.email,
+                ...(givenName ? { name: { given_name: givenName, ...(rest.length ? { surname: rest.join(" ") } : {}) } } : {}),
+              },
+            },
+          ],
+          items: [
+            {
+              name: String(itemName).slice(0, 200),
+              ...(itemDescription ? { description: String(itemDescription).slice(0, 1000) } : {}),
+              quantity: "1",
+              unit_amount: { currency_code: currency, value: amount },
+              unit_of_measure: "AMOUNT",
+            },
+          ],
+        },
+        `invoice-${reference}`,
+        { Prefer: "return=representation" },
+      );
+      return normalizeInvoice(data);
+    },
+
+    // Sends the invoice to the client by email (PayPal's own email in the sandbox) and returns the payer link.
+    async sendInvoice(invoiceId) {
+      const link = await call(
+        "POST",
+        `/v2/invoicing/invoices/${encodeURIComponent(invoiceId)}/send`,
+        { send_to_invoicer: false, send_to_recipient: true },
+        `send-${invoiceId}`,
+      );
+      const invoice = await this.getInvoice(invoiceId);
+      return { ...invoice, payUrl: invoice.payUrl || link?.href || null };
+    },
+
+    async getInvoice(invoiceId) {
+      return normalizeInvoice(await call("GET", `/v2/invoicing/invoices/${encodeURIComponent(invoiceId)}`));
+    },
+  };
+}
+
+// The few invoice fields this app relies on, read the same way for real and mock invoices.
+export function normalizeInvoice(data = {}) {
+  return {
+    id: data.id,
+    status: data.status,
+    reference: data.detail?.reference,
+    amount: data.amount?.value,
+    currency: data.amount?.currency_code || data.detail?.currency_code,
+    paidAmount: data.payments?.paid_amount?.value ?? null,
+    payUrl: data.detail?.metadata?.recipient_view_url || null,
+    // PayPal payments recorded against the invoice; their ids are what a refund needs.
+    paymentIds: (data.payments?.transactions || []).filter((t) => (t.type || "PAYPAL") === "PAYPAL" && t.payment_id).map((t) => t.payment_id),
   };
 }

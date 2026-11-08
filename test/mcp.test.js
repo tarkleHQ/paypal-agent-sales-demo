@@ -13,7 +13,7 @@ test("MCP: list tools and sell a file end to end over HTTP", async () => {
     assert.equal(await handle({ jsonrpc: "2.0", method: "notifications/initialized" }), null);
 
     const list = await handle({ jsonrpc: "2.0", id: 2, method: "tools/list" });
-    assert.deepEqual(list.result.tools.map((t) => t.name), ["create_paid_share", "create_event", "get_sales_status", "refund_order"]);
+    assert.deepEqual(list.result.tools.map((t) => t.name), ["create_client_job", "send_job_invoice", "get_job_status", "refund_job", "create_paid_share", "create_event", "get_sales_status", "refund_order"]);
 
     const created = await handle({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "create_paid_share", arguments: { title: "Kit", fileName: "kit.txt", content: "hello", price: 20 } } });
     const { productId } = JSON.parse(created.result.content[0].text);
@@ -63,7 +63,7 @@ test("HTTP /mcp: disabled without a token, bearer auth, one message per POST", a
 
     const ok = await post(app, { jsonrpc: "2.0", id: 1, method: "tools/list" }, "s3cret");
     assert.equal(ok.status, 200);
-    assert.equal((await ok.json()).result.tools.length, 4);
+    assert.equal((await ok.json()).result.tools.length, 8);
 
     assert.equal((await post(app, { jsonrpc: "2.0", method: "notifications/initialized" }, "s3cret")).status, 202);
     assert.equal((await post(app, "{nope", "s3cret")).status, 400);

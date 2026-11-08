@@ -1,6 +1,30 @@
 # PayPal agent sales demo
 
-An AI assistant sells things through PayPal checkout. It runs as an MCP server, so any MCP client (Claude, for example) can call its tools. **PayPal sandbox only**: the code refuses any other PayPal URL, and no real money moves.
+An AI assistant delivers a photographer's client gallery, paid by PayPal invoice, and sells files and tickets through PayPal checkout. It runs as an MCP server, so any MCP client (Claude, for example) can call its tools. **PayPal sandbox only**: the code refuses any other PayPal URL, and no real money moves.
+
+## Client delivery: a photographer's gallery, paid by PayPal invoice
+
+The main flow. A photographer tells the assistant what to deliver; the assistant creates a **job** (the client, the files, the price), and after the photographer approves, sends a **PayPal invoice**. The client opens their gallery and sees the files locked, with a button to pay. When PayPal reports the invoice paid, the gallery unlocks. A refund locks it again.
+
+| Tool | What the assistant can do |
+| --- | --- |
+| `create_client_job` | Start a delivery for one client: title, client name and email, price, files. Sends nothing. |
+| `send_job_invoice` | Create and send the PayPal invoice. Asks for the photographer's approval first. |
+| `get_job_status` | Where a job stands, re-read from PayPal. Without a job id, lists every job. |
+| `refund_job` | Refund the client in full and lock the files. Asks for approval first. |
+
+Rules the code enforces:
+
+- The gallery unlocks only after the invoice is **read back from PayPal** with status `PAID` and the full amount and currency. A webhook is signature-checked, then only tells the app to look; its body is never trusted.
+- A partial payment unlocks nothing. A payment for the wrong amount puts the job in `review` and unlocks nothing.
+- A refund (from the assistant, or made in PayPal) or a reversal locks the gallery again. A cancelled invoice cancels the job.
+- Sending or refunding needs a second call with an approval code bound to that job and action, valid for 15 minutes. A model cannot invent one.
+- If the webhook is late or missing, opening the gallery re-reads the invoice.
+- Optional: set `ZAPIER_WEBHOOK_URL` to a Zapier Catch Hook to receive `job.paid`, `job.delivered` and `job.refunded`. A failing hook never blocks an unlock.
+
+PayPal webhooks for this flow: `INVOICING.INVOICE.PAID`, `INVOICING.INVOICE.REFUNDED`, `INVOICING.INVOICE.CANCELLED`, plus the capture events below.
+
+## Selling files and tickets (earlier flow)
 
 ## What it does
 
@@ -26,7 +50,7 @@ Buyers open the link, pay with PayPal, and come back to a page that unlocks the 
 Needs Node 20 or later. No dependencies to install.
 
 ```sh
-npm test        # 11 tests, no credentials needed
+npm test        # 34 tests, no credentials needed
 npm run demo    # scripted story: sell a file, sell a ticket, refund
 npm start       # hosted mode: buyer pages plus HTTP MCP at /mcp on http://localhost:3000
 npm run stdio   # MCP over stdio for local clients, plus the buyer pages

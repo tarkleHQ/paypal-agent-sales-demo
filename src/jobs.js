@@ -119,8 +119,14 @@ export function createJobService({ paypal, store, baseUrl, notify = async () => 
         createdAt: now(),
       };
       jobs.set(job.id, job);
-      const prepared = await store.prepare(job);
-      job.clientUrl = prepared.clientUrl;
+      try {
+        const prepared = await store.prepare(job);
+        job.clientUrl = prepared.clientUrl;
+      } catch (err) {
+        // Nothing was sent or charged; the job is dropped so a retry starts clean. A folder the store already made may remain.
+        jobs.delete(job.id);
+        throw new Error(`The files could not be prepared for the client: ${err.message}`);
+      }
       return view(job);
     },
 
@@ -128,6 +134,12 @@ export function createJobService({ paypal, store, baseUrl, notify = async () => 
     sendInvoice(jobId) {
       return serialize(jobId, async () => {
         const job = mustGet(jobId);
+        // A send whose portal invite failed is finished here on the next try; anything else after draft is already done.
+        if (job.status === "invoiced" && store.invite && !job.invited) {
+          await store.invite(job);
+          job.invited = true;
+          return view(job);
+        }
         if (job.status !== "draft") return view(job);
         const draft = await paypal.createInvoice({
           reference: job.id,
@@ -142,6 +154,11 @@ export function createJobService({ paypal, store, baseUrl, notify = async () => 
         job.invoiceId = sent.id || draft.id;
         job.payUrl = sent.payUrl;
         job.status = "invoiced";
+        // The client may now be emailed: the photographer approved this send. (Tarkle emails the portal invite the first time.)
+        if (store.invite) {
+          await store.invite(job);
+          job.invited = true;
+        }
         return view(job);
       });
     },
@@ -212,13 +229,14 @@ export function createJobService({ paypal, store, baseUrl, notify = async () => 
     clientView(jobId, key) {
       const job = jobs.get(jobId);
       if (!job || !key || key !== job.accessKey) return null;
-      return { ...view(job), unlocked: job.status === "delivered" && store.isUnlocked(job) };
+      return { ...view(job), unlocked: job.status === "delivered" && store.isUnlocked(job), inPortal: store.kind === "tarkle" };
     },
 
     clientFile(jobId, key, index) {
       const job = jobs.get(jobId);
       if (!job || !key || key !== job.accessKey) return null;
-      if (job.status !== "delivered" || !store.isUnlocked(job)) return null;
+      // In Tarkle mode the files are only in the client's portal, never served by this app.
+      if (store.kind !== "mock" || job.status !== "delivered" || !store.isUnlocked(job)) return null;
       return job.files[Number(index)] ?? null;
     },
 

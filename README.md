@@ -24,6 +24,26 @@ Rules the code enforces:
 
 PayPal webhooks for this flow: `INVOICING.INVOICE.PAID`, `INVOICING.INVOICE.REFUNDED`, `INVOICING.INVOICE.CANCELLED`, plus the capture events below.
 
+### Deliver into the client's Tarkle portal
+
+Without Tarkle settings, the gallery is a page of this app, so everything runs with no accounts. Set these to deliver into the client's own [Tarkle](https://tarkle.com) client portal instead (the workspace must be on Pro, which includes the client portal):
+
+| Variable | Value |
+| --- | --- |
+| `TARKLE_API_BASE` | `https://tarkle.com/api/v1` |
+| `TARKLE_API_KEY` | An API key from Tarkle's Settings > API. Keep it on the server only. |
+| `TARKLE_WORKSPACE_KEY` | The workspace's 8-character key (`GET /api/v1/workspaces` lists them) |
+| `TARKLE_PORTAL_URL` | The portal address to show the client, for example `https://yourstudio.tarkle.com/portal` |
+
+What happens, all through Tarkle's public API:
+
+1. **Job created:** the client is found or added as a contact, the files are uploaded into a new folder, and the folder is shared as a **view-only** transfer with a random password nobody is told. The transfer is delivered to the contact's portal. No email yet.
+2. **Invoice sent** (after the photographer approves): the contact's portal access is turned on, and Tarkle emails the portal invite.
+3. **Invoice paid:** `PATCH /transfers/{id} { "view_only": false }`, so the client can download in their portal.
+4. **Refund or reversal:** `{ "view_only": true }` again.
+
+Every write sends an `Idempotency-Key` fixed per job and step, so a retry never creates anything twice. If Tarkle fails to unlock, the webhook answers an error so PayPal retries it.
+
 ## Selling files and tickets (earlier flow)
 
 ## What it does
@@ -50,7 +70,7 @@ Buyers open the link, pay with PayPal, and come back to a page that unlocks the 
 Needs Node 20 or later. No dependencies to install.
 
 ```sh
-npm test        # 34 tests, no credentials needed
+npm test        # 43 tests, no credentials needed
 npm run demo    # scripted story: sell a file, sell a ticket, refund
 npm start       # hosted mode: buyer pages plus HTTP MCP at /mcp on http://localhost:3000
 npm run stdio   # MCP over stdio for local clients, plus the buyer pages

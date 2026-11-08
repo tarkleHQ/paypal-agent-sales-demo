@@ -4,6 +4,7 @@ import { createMockPayPal } from "./mock-paypal.js";
 import { createService } from "./service.js";
 import { createJobService } from "./jobs.js";
 import { createMockStore } from "./stores.js";
+import { createTarkleStore } from "./tarkle-store.js";
 import { createNotifier } from "./notify.js";
 import { createWebServer } from "./web.js";
 import { createTools } from "./tools.js";
@@ -18,7 +19,11 @@ export function bootstrap(env = process.env, { fetchImpl = fetch } = {}) {
       ? createPayPalClient({ clientId: env.PAYPAL_CLIENT_ID, secret: env.PAYPAL_CLIENT_SECRET, fetchImpl })
       : createMockPayPal({ baseUrl });
   const service = createService({ paypal, baseUrl });
-  const store = createMockStore({ baseUrl });
+  // The real client portal when Tarkle is configured; otherwise a gallery page of this app, so it runs with no accounts.
+  const store =
+    env.TARKLE_API_BASE && env.TARKLE_API_KEY && env.TARKLE_WORKSPACE_KEY
+      ? createTarkleStore({ apiBase: env.TARKLE_API_BASE, apiKey: env.TARKLE_API_KEY, workspaceKey: env.TARKLE_WORKSPACE_KEY, portalUrl: env.TARKLE_PORTAL_URL || null, fetchImpl })
+      : createMockStore({ baseUrl });
   const notify = createNotifier({ url: env.ZAPIER_WEBHOOK_URL, fetchImpl });
   const jobs = createJobService({ paypal, store, baseUrl, notify });
   const tools = createTools(service, jobs);

@@ -145,19 +145,24 @@ ${soldOut ? "<p>Sold out.</p>" : `<form method="post" action="/buy/${esc(p.id)}/
         if (!jobs.clientView(parts[1], key)) return send(res, 403, page("<h1>No access</h1><p>This link is not valid.</p>"));
         if (jobs.clientView(parts[1], key).status === "invoiced") await jobs.refreshJob(parts[1]).catch(() => {});
         const v = jobs.clientView(parts[1], key);
-        const files = v.files
-          .map((name, i) => (v.unlocked ? `<li><a href="/client/${esc(v.jobId)}/file/${i}?key=${esc(key)}">${esc(name)}</a></li>` : `<li>${esc(name)} <small>(locked)</small></li>`))
-          .join("");
+        const files = v.inPortal
+          ? ""
+          : v.files
+              .map((name, i) => (v.unlocked ? `<li><a href="/client/${esc(v.jobId)}/file/${i}?key=${esc(key)}">${esc(name)}</a></li>` : `<li>${esc(name)} <small>(locked)</small></li>`))
+              .join("");
+        const portal = v.inPortal && v.clientUrl ? `<p><a class="btn" href="${esc(v.clientUrl)}">Open your client portal</a></p>` : "";
         const action = v.unlocked
-          ? "<p>Your files are ready to download.</p>"
+          ? v.inPortal
+            ? `<p>Your files are ready to download in your client portal.</p>${portal}`
+            : "<p>Your files are ready to download.</p>"
           : v.status === "invoiced" && v.payUrl
-            ? `<p>Pay the invoice to unlock your files.</p><p><a class="btn" href="${esc(v.payUrl)}">Pay ${esc(v.price)} ${esc(v.currency)} with PayPal</a></p>`
+            ? `<p>Pay the invoice to unlock your files.</p><p><a class="btn" href="${esc(v.payUrl)}">Pay ${esc(v.price)} ${esc(v.currency)} with PayPal</a></p>${portal}`
             : v.status === "refunded"
               ? "<p>This delivery was refunded.</p>"
               : v.status === "review"
                 ? "<p>We received a payment that needs a check. Your photographer will be in touch.</p>"
                 : "<p>Your photographer has not sent the invoice yet.</p>";
-        return send(res, 200, page(`<h1>${esc(v.title)}</h1>${action}<ul>${files}</ul>`));
+        return send(res, 200, page(`<h1>${esc(v.title)}</h1>${action}${files ? `<ul>${files}</ul>` : ""}`));
       }
 
       if (jobs && req.method === "GET" && parts[0] === "client" && parts[2] === "file" && parts.length === 4) {

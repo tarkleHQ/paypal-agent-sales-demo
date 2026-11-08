@@ -23,3 +23,12 @@ services:
         sync: false
       - key: ZAPIER_WEBHOOK_URL # optional Zapier Catch Hook for job.paid, job.delivered and job.refunded
         sync: false
+      # Optional: deliver into the client's real Tarkle client portal instead of this app's gallery page.
+      - key: TARKLE_API_BASE # e.g. https://tarkle.com/api/v1 (or the preview that serves the portal-delivery routes)
+        sync: false
+      - key: TARKLE_API_KEY # a Tarkle API key from Settings > API, for a workspace on Pro
+        sync: false
+      - key: TARKLE_WORKSPACE_KEY # the workspace's 8-character key
+        sync: false
+      - key: TARKLE_PORTAL_URL # the client portal address shown to clients, e.g. https://yourstudio.tarkle.com/portal
+        sync: false
